@@ -1,0 +1,60 @@
+# FINAL_MODEL_CONFIG.yaml
+# Frozen after Stage 3 tuning, BEFORE any TEST-set evaluation. Per the task spec,
+# the architecture below is not to be changed based on TEST results; if TEST results
+# disappoint, they are reported as-is.
+
+model:
+  name: "SBGA-F (Sparse Bidirectional Graph Attention with Focal Loss)"
+  candidate_id: "B_SBGAF"
+  class: "candidate_models.CandidateB_SBGAF"
+  architecture:
+    temporal_encoder: "LSTM + additive attention pooling (LSTMAttnEncoder)"
+    window_length: 10
+    hidden_dim: 192
+    lstm_layers: 2
+    graph_attention: "learned top-k sparse bidirectional attention (SparseTopKAttention x2: in-neighbors, out-neighbors)"
+    top_k_neighbors: 6
+    node_features: "structural/positional (in-degree, out-degree, PageRank, clustering coefficient), topology-agnostic"
+    dropout: 0.3397475692650171
+    activation: "relu"
+    output_head: "dense -> softmax, 15-way multiclass (Attack_type)"
+
+data:
+  dataset: "Edge-IIoTset (DNN-EdgeIIoT-dataset.csv)"
+  substitution_rationale: "see DATA_AUDIT.md -- source paper dataset not reproducible"
+  system_size: 100          # nodes in the probabilistic device-communication graph
+  view: "fusion"             # packet + flow aggregated features
+  target: "Attack_type"      # 15-class multiclass (genuine upgrade over source paper's binary-only label)
+  n_classes: 15
+  sampling: "sqrt-frequency compression, TOTAL_BUDGET=300000 (see scripts/01_prepare_data.py)"
+  split: "capture/session-aware temporal split, 70/10/20, per-class contiguous blocks (see DATA_AUDIT.md)"
+  preprocessing: "OrdinalEncoder (categoricals) + StandardScaler (numeric), fit on TRAIN split only"
+  graph_construction: "TRAIN-only empirical transition-probability adjacency (probabilistic device graph), see scripts/01_prepare_data.py:build_graph"
+
+training:
+  optimizer: "Adam"
+  learning_rate: 0.0018098827092128786
+  batch_size: 1024
+  max_epochs: 30
+  early_stopping:
+    metric: "validation macro-F1"
+    patience: 8
+  loss: "multiclass focal loss"
+  focal_gamma: 1.9229587245058637
+  class_weights: "1/sqrt(class_count), normalized to mean 1 (sqrt-frequency compression, consistent with data sampling)"
+
+model_selection:
+  primary_metric: "validation macro-F1"
+  secondary_metrics: ["balanced accuracy", "minority-class (min per-class) recall", "macro PR-AUC/ROC-AUC-OVR"]
+  selection_protocol: "Stage1 smoke test (1 seed) -> Stage2 3-seed validation screening -> Stage3 Optuna TPE tuning (20 trials, validation-only) -> re-verified across 3 seeds -> frozen here (see MODEL_SELECTION_REPORT.md)"
+
+final_evaluation_protocol:
+  test_set: "untouched until this point"
+  seeds: [42, 123, 2024, 7, 99]     # 5 seeds for headline TEST results
+  ablation_seeds: [42, 123, 2024]    # 3 seeds for ablation arms
+  benchmarks: 15   # see BENCHMARK_WTL.csv / manuscript Table for the full roster
+  statistical_tests: "paired Wilcoxon signed-rank vs. each benchmark on per-seed macro-F1, Holm correction across the benchmark family"
+
+notes:
+  - "Architecture, hyperparameters, and data protocol are frozen as of this file. TEST-set results, once produced, are reported as-is and do not trigger a return to candidate screening or re-tuning."
+  - "Candidate A (GT-Cascade) and Candidate C (TCN-GXD) remain in the study as ablation/comparison points (see MODEL_SELECTION_REPORT.md) but are not the frozen final model."
