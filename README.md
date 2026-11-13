@@ -1,30 +1,27 @@
 # SBGA-F: Sparse Bidirectional Graph Attention with Focal Loss
 
-Source code for **SBGA-F**, a graph-based intrusion detection model for
-multiclass IoT/IIoT attack traffic, combining:
+Source code for the paper
 
-- a temporal encoder (LSTM + additive attention pooling) over per-node
-  packet/flow windows,
-- **learned, sparse, top-k bidirectional graph attention** (separate
-  in-neighbor and out-neighbor attention heads) over a probabilistic
-  device-communication graph,
-- **topology-agnostic structural/positional node features** (in-degree,
-  out-degree, PageRank, clustering coefficient) instead of node-identity
-  embeddings, so the model can generalize zero-shot to device graphs of a
-  different size than the one it was trained on,
-- a class-balanced **multiclass focal loss**, for robustness to the heavy
-  class imbalance typical of real IoT attack datasets.
+> **Stacking Sparse Bidirectional Graph Attention with Gradient Boosted Trees
+> for Multiclass Intrusion Detection in Internet of Things Networks**
+> Mohamed Massaoudi and Maymouna Ez Eddin
 
-An extension, **SBGA-F-Stack**, combines SBGA-F's learned representation
-with a gradient-boosted-tree base learner through a logistic-regression
-meta-learner, closing the same-distribution accuracy gap against boosting
-baselines while retaining SBGA-F's zero-shot cross-topology transfer.
+**SBGA-F** is a multiclass intrusion detector for IoT/IIoT traffic that combines
 
-This repository contains the model and experiment source code for
-independent reproduction. It intentionally does **not** include the
-dataset, generated result tables, figures, or the manuscript — only the
-code needed to run the full pipeline end-to-end on your own copy of the
-data.
+- a temporal encoder (LSTM + attention pooling) over the ten most recent
+  feature vectors of a device,
+- learned, masked top-k attention over the prototypes of the strongest
+  incoming and outgoing neighbors of the device in an event-transition graph,
+- topology-derived node descriptors (in-degree, out-degree, PageRank,
+  clustering) in place of node-identity embeddings, so that no parameter
+  depends on the number of devices,
+- a class-balanced multiclass focal loss.
+
+**SBGA-F-Stack** fuses the class probabilities of SBGA-F and CatBoost through
+a logistic-regression meta-learner fitted on validation data.
+
+The repository contains the model and experiment code only. It does not
+include datasets, result tables, figures, or the manuscript.
 
 ## Environment
 
@@ -32,78 +29,126 @@ data.
 pip install -r requirements.txt
 ```
 
-A CUDA-capable GPU is strongly recommended; CPU-only execution works but
-deep-learning/boosting training will be considerably slower.
+A CUDA-capable GPU is recommended. On some PyTorch/cuDNN builds the float32
+cuDNN LSTM kernel is slow; setting the environment variable
+`SBGAF_NATIVE_LSTM=1` selects PyTorch's native LSTM kernel (same model, same
+precision) for the scripts that import `exp_common.py`.
 
 ## Data
 
-The pipeline expects the public **Edge-IIoTset** dataset
-(Ferrag et al., 2022), specifically `DNN-EdgeIIoT-dataset.csv`, at the path
-configured at the top of `scripts/01_prepare_data.py` (edit the `SRC`
-constant to point at your local copy). The dataset is not redistributed in
-this repository.
+Two public datasets are used. Neither is redistributed here.
+
+| Dataset | File | Where the path is set |
+|---|---|---|
+| Edge-IIoTset (Ferrag et al., 2022) | `DNN-EdgeIIoT-dataset.csv` | `SRC` in `scripts/01_prepare_data.py` |
+| TON_IoT network subset (Moustafa, 2021) | `train_test_network.csv` | `SRC` in `scripts/36_r2_ton.py` |
+
+Edit the two `SRC` constants to point at your local copies.
 
 ## Repository structure
 
 ```
-requirements.txt        Python environment
-FINAL_MODEL_CONFIG.yaml Frozen SBGA-F architecture, hyperparameters, and
-                         training/evaluation protocol
+requirements.txt          Python environment
+FINAL_MODEL_CONFIG.yaml   Frozen SBGA-F architecture, hyperparameters and protocol
+config/tuned_baselines.json   Baseline hyperparameters selected with the same
+                              tuning budget as SBGA-F (20 TPE trials)
 scripts/
-  01_prepare_data.py        Cleaning, leakage-safe temporal split, graph
-                             construction, packet/flow/fusion feature tables
-  02_reproduce_source_method.py   Reproduction of the source-paper baseline
-                                    (BiRAGNN) and its benchmark suite
-  03_make_reproduction_report.py  Reproduction-report generation
-  04_candidate_screening.py       Validation-only screening of candidate
-                                    hybrid architectures (incl. SBGA-F)
-  05_classical_benchmarks.py      Classical/boosting benchmark suite
-  06_deep_benchmarks_multiclass.py  Multiclass retraining of deep/graph
-                                      benchmark architectures
-  07_tune_finalists.py            Hyperparameter tuning (Optuna) of the
-                                    finalist candidates
-  08_final_test_evaluation.py     Final test-set evaluation: SBGA-F vs. all
-                                    benchmarks, multi-seed
-  09_ablation.py                  Ablation study
-  10_robustness_generalization.py Robustness / cross-topology transfer
-  10b_robustness_baseline_comparison.py  Robustness baseline comparison
-  11_statistics_wtl.py            Statistical testing (Wilcoxon + Holm),
-                                    win/tie/loss
-  12_generate_figures.py          Figure generation from result CSVs
-  13_stacked_model.py             SBGA-F-Stack (stacking ensemble)
-  14_transfer_ablation.py         Transfer-specific ablation
-  15_stack_transfer_check.py      SBGA-F-Stack cross-topology transfer check
-  16_stack_robustness_check.py    SBGA-F-Stack robustness check
-  candidate_models.py    Candidate hybrid architectures, incl. SBGA-F
-                          (`CandidateB_SBGAF`)
-  models.py               Benchmark model architectures
-  ft_transformer.py       FT-Transformer benchmark architecture
-  common.py               Shared data-loading, windowing, and graph utilities
+  Shared modules
+    exp_common.py         Data loading, windows, graph construction, prototypes,
+                          SBGA-F (SBGAFv2), training loops, stacking, perturbations
+    common.py             Data-loading, windowing and graph utilities
+    models.py             Benchmark architectures (FNN, RNN, CNN, Transformer,
+                          GNN, TGNN, BiRAGNN)
+    candidate_models.py   Focal loss, TCN encoder, candidate architectures
+    ft_transformer.py     FT-Transformer benchmark
+
+  Data preparation
+    01_prepare_data.py    Cleaning, class-wise chronological split, sampling,
+                          host assignment, flow aggregation, graphs (8/50/100 nodes)
+    17_extract_aux_hosts.py   Host and timestamp columns aligned with the feature table
+
+  Model development (screening and tuning)
+    02 ... 16             Source-method reproduction, candidate screening,
+                          benchmarks, Optuna tuning of SBGA-F, first evaluation
+
+  Main experiments (ten seeds)
+    18_rev_main.py        16-model benchmark, SBGA-F-Stack, perturbation suite
+    19_rev_ablation.py    Component ablation (standalone)
+    20_rev_graph_controls.py   Alternative graph estimators, interleaved stream
+    21_rev_transfer.py, 21b_rev_transfer_tw.py   Parameter reuse across graph sizes
+    23_rev_runtime.py     End-to-end runtime by stage
+    22_rev_analysis.py, 25_rev_figures.py        Tables and figures
+
+  Controls and replication (ten seeds)
+    31_r2_ablation.py     Ablation at the standalone and stack levels
+                          (attention directions, neighborhood size, descriptors,
+                          aggregation, encoder, loss)
+    32_r2_interleaved_causal.py   Class-interleaved stream; causal flow features
+    33_r2_transfer.py     Reuse with limited target data, temporal-only and
+                          node-indexed baselines, withheld devices
+    34_r2_robust.py       Degraded/stale graph context, augmented tree baselines,
+                          repeated perturbation draws, FGSM perturbation
+    35_r2_tune.py         Equal tuning budget for the baselines; tuned evaluation
+    36_r2_ton.py          TON_IoT preprocessing, benchmark, stacks, graph-size reuse
+    37_r2_audit.py        Window label purity, duplicates, device-identity
+                          classifier, stacking controls, per-class metrics,
+                          bootstrap and McNemar tests
+    38_r2_memory.py       Model size, GPU memory, CPU-only latency
+    41_r2_ton_audit.py    Device-identity and per-class audit for TON_IoT
+    39_r2_analysis.py, 40_r2_figures.py, 42_r2_tables.py   Statistics, figures, tables
 ```
 
 ## Reproduction order
 
+Seeds: `42 123 2024 7 99 555 777 2025 31 88`.
+
 ```bash
+# data
 python scripts/01_prepare_data.py
-python scripts/02_reproduce_source_method.py
-python scripts/03_make_reproduction_report.py
-python scripts/04_candidate_screening.py
-python scripts/05_classical_benchmarks.py
-python scripts/06_deep_benchmarks_multiclass.py
-python scripts/07_tune_finalists.py
-python scripts/08_final_test_evaluation.py
-python scripts/09_ablation.py
-python scripts/10_robustness_generalization.py
-python scripts/10b_robustness_baseline_comparison.py
-python scripts/11_statistics_wtl.py
-python scripts/12_generate_figures.py
-python scripts/13_stacked_model.py
-python scripts/14_transfer_ablation.py
-python scripts/15_stack_transfer_check.py
-python scripts/16_stack_robustness_check.py
+python scripts/17_extract_aux_hosts.py
+
+# main experiments (pass the seeds as arguments)
+python scripts/18_rev_main.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/19_rev_ablation.py 42 123 2024 7 99
+python scripts/20_rev_graph_controls.py 42 123 2024 7 99
+python scripts/21_rev_transfer.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/21b_rev_transfer_tw.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/23_rev_runtime.py
+python scripts/22_rev_analysis.py
+python scripts/25_rev_figures.py
+
+# controls and replication (require the probabilities written by 18_rev_main.py)
+python scripts/31_r2_ablation.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/32_r2_interleaved_causal.py interleaved 42 123 2024 7 99 555 777 2025 31 88
+python scripts/32_r2_interleaved_causal.py causal 42 123 2024 7 99 555 777 2025 31 88
+python scripts/33_r2_transfer.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/34_r2_robust.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/35_r2_tune.py tune CatBoost LightGBM XGBoost RandomForest BiRAGNN RNN
+python scripts/35_r2_tune.py eval 42 123 2024 7 99 555 777 2025 31 88
+python scripts/36_r2_ton.py 42 123 2024 7 99 555 777 2025 31 88
+python scripts/37_r2_audit.py
+python scripts/41_r2_ton_audit.py
+python scripts/38_r2_memory.py
+python scripts/39_r2_analysis.py
+python scripts/40_r2_figures.py
+python scripts/42_r2_tables.py
 ```
 
-All random seeds are recorded in each script and in `FINAL_MODEL_CONFIG.yaml`.
+Scripts `02`–`16` document the model-development stage (screening, tuning and
+the first evaluation) and are not required to reproduce the reported tables.
+Results are written to `results/`, tables and figures to `revision/`.
+
+## Notes on the protocol
+
+- Each class of both datasets is stored as one contiguous capture. The split is
+  chronological within each class (70/10/20); preprocessing, the graph and the
+  node prototypes use the training partition only.
+- The primary flow aggregates are computed over the complete flow record. A
+  causal variant (only packets up to the current one, flow key without the
+  class label) is available through `exp_common.load_base("causal")`.
+- "Parameter reuse across graph sizes" applies a trained model to another node
+  partition of the same capture after the adjacency, descriptors, neighbor
+  lists and prototypes are recomputed from unlabeled events of that partition.
 
 ## License
 
