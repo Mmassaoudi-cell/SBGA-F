@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 LABEL_COLS = {"Attack_label", "Attack_type", "split"}
 NODE_COLS = {"node_1", "node_8", "node_50", "node_100"}

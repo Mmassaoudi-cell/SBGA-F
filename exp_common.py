@@ -1,7 +1,7 @@
 """
-Shared infrastructure for the revision experiments (scripts 18-22).
+SBGA-F model code: data interface, graph context, SBGA-F network, training, and stacking.
 
-Differences from the original screening pipeline (04_candidate_screening.prepare_data):
+Implementation notes:
   * GPU-resident data: windows are stored as index arrays into the feature matrix and are
     gathered per mini-batch, so every training run is considerably faster.
   * Explicit graph edge cases:
@@ -36,7 +36,7 @@ from candidate_models import FocalLoss, class_weights_sqrt, TCNEncoder, DenseNei
 from ft_transformer import FTTransformer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-ROOT = os.path.join(os.path.dirname(__file__), "..")
+ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
 RESULTS_DIR = os.environ.get("SBGAF_RESULTS", os.path.join(ROOT, "results"))
 SMOKE = bool(os.environ.get("SBGAF_SMOKE"))
@@ -45,7 +45,6 @@ SMOKE = bool(os.environ.get("SBGAF_SMOKE"))
 if os.environ.get("SBGAF_NATIVE_LSTM") == "1":
     torch.backends.cudnn.enabled = False
 PROB_DIR = os.path.join(RESULTS_DIR, "probs")
-os.makedirs(PROB_DIR, exist_ok=True)
 
 SEEDS10 = [42, 123, 2024, 7, 99, 555, 777, 2025, 31, 88]
 W = 10
@@ -744,6 +743,7 @@ def full_metrics(y, proba, n_classes=15):
 
 
 def save_probs(seed, name, split, p):
+    os.makedirs(PROB_DIR, exist_ok=True)
     np.save(os.path.join(PROB_DIR, f"{seed}_{name}_{split}.npy"), p.astype(np.float32))
 
 
